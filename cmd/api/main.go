@@ -3,6 +3,7 @@ package main
 import (
 	"fileuploader/internal/config"
 	"fileuploader/internal/filesystem/miniosystem"
+	"fileuploader/internal/filesystem/s3aws"
 	"fileuploader/internal/handlers"
 	"fileuploader/pkg/logger"
 	"fmt"
@@ -23,18 +24,18 @@ func main() {
 }
 
 //initApp starts the app
-func initApp() {
+func initApp() map[string]interface{} {
 	config, err := config.NewConfig()
 	if err != nil {
 		logger.Fatalf("Config can not be created %v", err)
 	}
-	createFileSystem(*config, config.RemoteFSName)
+	return createFileSystem(*config, config.RemoteFSName)
 }
 
 //createFileSystem creates the file systems for MINIO and AWS
 func createFileSystem(config config.Config, providerName string) map[string]interface{} {
 	remoteFileSystem := make(map[string]interface{})
-	//TODO: add AWS case
+
 	switch providerName {
 	case "MINIO":
 		if config.Minio.Secret != "" {
@@ -53,7 +54,15 @@ func createFileSystem(config config.Config, providerName string) map[string]inte
 			}
 			remoteFileSystem["MINIO"] = minio
 		}
-
+	case "S3":
+		s3 := s3aws.S3{
+			Key:      config.AWS.Key,
+			Secret:   config.AWS.Secret,
+			Region:   config.AWS.Region,
+			Endpoint: config.AWS.Endpoint,
+			Bucket:   config.AWS.Bucket,
+		}
+		remoteFileSystem["S3"] = s3
 	default:
 		logger.Errorf("Invalid Remote file system configured")
 	}

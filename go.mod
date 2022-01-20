@@ -4,6 +4,7 @@ go 1.17
 
 require (
 	github.com/aws/aws-sdk-go v1.42.35
+	github.com/gabriel-vasile/mimetype v1.4.0
 	github.com/go-chi/cors v1.2.0
 	github.com/hashicorp/go-multierror v1.1.1
 	github.com/joho/godotenv v1.4.0

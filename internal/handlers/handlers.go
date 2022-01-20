@@ -17,12 +17,14 @@ import (
 //handler is the handler struct
 type handler struct {
 	config config.Config
+	fs     filesystem.FS
 }
 
 //NewHandler sets up the handler struct
-func NewHandler(config config.Config) *handler {
+func NewHandler(config config.Config, fs filesystem.FS) *handler {
 	return &handler{
 		config: config,
+		fs:     fs,
 	}
 }
 

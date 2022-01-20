@@ -1,14 +1,20 @@
 package s3aws
 
 import (
+	"bytes"
 	"fileuploader/internal/filesystem"
 	"fileuploader/pkg/logger"
+	"fmt"
+	"net/http"
+	"os"
+	"path"
 
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/awserr"
 	"github.com/aws/aws-sdk-go/aws/credentials"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/s3"
+	"github.com/aws/aws-sdk-go/service/s3/s3manager"
 )
 
 type S3 struct {
@@ -24,19 +30,63 @@ func (s *S3) getCredentials() *credentials.Credentials {
 	return c
 }
 
-func (s *S3) Put(fileName, folder string) error {
-	return nil
-}
-
-func (s *S3) List(prefix string) ([]filesystem.Listing, error) {
-	var listing []filesystem.Listing
-
+func (s *S3) createAWSSession() *session.Session {
 	c := s.getCredentials()
 	sess := session.Must(session.NewSession(&aws.Config{
 		Endpoint:    &s.Endpoint,
 		Region:      &s.Region,
 		Credentials: c,
 	}))
+	return sess
+}
+
+func (s *S3) Put(fileName, folder string) error {
+	sess := s.createAWSSession()
+	uploader := s3manager.NewUploader(sess)
+
+	f, err := os.Open(fileName)
+	if err != nil {
+		return err
+	}
+
+	defer f.Close()
+
+	fileInfo, err := f.Stat()
+	if err != nil {
+		return err
+	}
+
+	var size = fileInfo.Size()
+
+	buffer := make([]byte, size)
+	_, err = f.Read(buffer)
+	if err != nil {
+		return err
+	}
+
+	fileBytes := bytes.NewReader(buffer)
+	fileType := http.DetectContentType(buffer)
+
+	_, err = uploader.Upload(&s3manager.UploadInput{
+		Bucket:      aws.String(s.Bucket),
+		Key:         aws.String(fmt.Sprintf("%s/%s", folder, path.Base(fileName))),
+		Body:        fileBytes,
+		ACL:         aws.String("public-read"), //can read but not change
+		ContentType: aws.String(fileType),
+		Metadata: map[string]*string{
+			"Key": aws.String("MetadataValue"),
+		},
+	})
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func (s *S3) List(prefix string) ([]filesystem.Listing, error) {
+	var listing []filesystem.Listing
+
+	sess := s.createAWSSession()
 
 	svc := s3.New(sess)
 	input := &s3.ListObjectsInput{
@@ -77,9 +127,68 @@ func (s *S3) List(prefix string) ([]filesystem.Listing, error) {
 }
 
 func (s *S3) Delete(itemsToDelete []string) bool {
+	sess := s.createAWSSession()
+
+	svc := s3.New(sess)
+
+	for _, item := range itemsToDelete {
+		input := &s3.DeleteObjectsInput{
+			Bucket: aws.String(s.Bucket),
+			Delete: &s3.Delete{
+				Objects: []*s3.ObjectIdentifier{
+					{
+						Key: aws.String(item),
+					},
+				},
+				Quiet: aws.Bool(false),
+			},
+		}
+		_, err := svc.DeleteObjects(input)
+		if err != nil {
+			if aerr, ok := err.(awserr.Error); ok {
+				switch aerr.Code() {
+				default:
+					logger.Errorf("Amazon error: %v", aerr.Error())
+					return false
+				}
+			} else {
+				logger.Errorf("Other error: %v", err)
+				return false
+			}
+		}
+	}
 	return true
 }
 
 func (s *S3) Get(destination string, items ...string) error {
+	sess := s.createAWSSession()
+
+	for _, item := range items {
+		err := func() error {
+			file, err := os.Create(fmt.Sprintf("%s/%s", destination, item))
+			if err != nil {
+				return err
+			}
+
+			defer file.Close()
+
+			downloader := s3manager.NewDownloader(sess)
+			_, err = downloader.Download(file,
+				&s3.GetObjectInput{
+					Bucket: aws.String(s.Bucket),
+					Key:    aws.String(item),
+				},
+			)
+			if err != nil {
+				return err
+			}
+
+			return nil
+		}()
+		if err != nil {
+			return err
+		}
+	}
+
 	return nil
 }
