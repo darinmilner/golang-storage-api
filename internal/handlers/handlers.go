@@ -5,6 +5,7 @@ import (
 	"fileuploader/internal/filesystem"
 	"fileuploader/internal/filesystem/miniosystem"
 	"fileuploader/internal/filesystem/s3aws"
+	"fileuploader/internal/services/uploads"
 	"fileuploader/pkg/logger"
 	"fmt"
 	"io"
@@ -16,12 +17,13 @@ import (
 
 //handler is the handler struct
 type handler struct {
-	config config.Config
-	fs     filesystem.FS
+	config        config.Config
+	fs            filesystem.FS
+	uploadService uploads.Upload
 }
 
 //NewHandler sets up the handler struct
-func NewHandler(config config.Config, fs filesystem.FS) *handler {
+func NewHandler(config config.Config, fs filesystem.FS, uploadService uploads.Upload) *handler {
 	return &handler{
 		config: config,
 		fs:     fs,
@@ -70,11 +72,11 @@ func (s *service) ListFS(w http.ResponseWriter, r *http.Request) {
 }
 
 //PostUploadToFS uploads a file to the FS
-func (s *service) PostUploadToFS(w http.ResponseWriter, r *http.Request) {
+func (s *service) PostUploadToFS(rend Renderer, r *http.Request) error {
 	fileName, err := getFileToUpload(r, "formFile")
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
+		return rend.JSON(err.Error(), http.StatusInternalServerError)
+
 	}
 
 	// get file to post to remote storage
@@ -85,12 +87,12 @@ func (s *service) PostUploadToFS(w http.ResponseWriter, r *http.Request) {
 		fs := s.minio
 		err = fs.Put(fileName, "")
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
+			return rend.JSON(err.Error(), http.StatusInternalServerError)
 		}
 	}
 
-	//TODO: send json
+	// send json
+	return rend.JSON("Upload successful", http.StatusCreated)
 }
 
 //getFileToUpload uploads a file to the remote storage system
@@ -123,8 +125,8 @@ func getFileToUpload(r *http.Request, fieldName string) (string, error) {
 	return fmt.Sprintf("./tmp/%s", header.Filename), nil
 }
 
-//DeleteFromFS deletes a file from the remote storage  TODO: add AWS
-func (s *service) DeleteFromFS(w http.ResponseWriter, r *http.Request) {
+//DeleteFromFS deletes a file from the remote storage
+func (s *service) DeleteFromFS(rend Renderer, r *http.Request) error {
 	var fs filesystem.FS
 	fsType := r.URL.Query().Get("fs_type")
 	item := r.URL.Query().Get("file")
@@ -132,13 +134,53 @@ func (s *service) DeleteFromFS(w http.ResponseWriter, r *http.Request) {
 	case "MINIO":
 		f := s.minio
 		fs = &f
+	case "AWS":
+		f := s.s3
+		fs = &f
 	}
 
 	deleted := fs.Delete([]string{item})
 	if deleted {
 		//send json
-		WriteJSON(w, http.StatusOK, fmt.Sprintf("%s was deleted", item))
+		return rend.JSON(fmt.Sprintf("%s was deleted", item), http.StatusOK)
 	}
 
-	WriteJSON(w, http.StatusBadRequest, "Something went wrong")
+	return rend.JSON("Something went wrong", http.StatusBadRequest)
+}
+
+func (s *service) PostUpload(rend Renderer, r *http.Request) error {
+	err := s.uploadService.UploadFile(r, "", "formFile", &s.s3)
+	if err != nil {
+		msg := fmt.Sprintf("upload err: %v", err)
+		rend.JSON(msg, http.StatusInternalServerError)
+	}
+
+	return rend.JSON("image successfully uploaded. ", http.StatusCreated)
+}
+
+func (s *service) MaintenanceMode(rend Renderer, r *http.Request) error {
+	var payload struct {
+		IsMaintenanceMode bool   `json:"isMaintenanceMode"`
+		AdminKey          string `json:"adminKey"`
+	}
+	err := ReadJSON(r, &payload)
+	if err != nil {
+		logger.Errorf("error unmarshalling json %v", err)
+		return err
+	}
+
+	if payload.AdminKey != os.Getenv("ADMIN_KEY") {
+		logger.Error("unauthorized")
+		return rend.JSON("You are not authorized ", http.StatusForbidden)
+	}
+	maintenance := payload.IsMaintenanceMode
+	if maintenance {
+		s.maintenanceMode = true
+	} else {
+		s.maintenanceMode = false
+	}
+
+	rpcClient(maintenance)
+
+	return rend.JSON("maintenance mode has been changed ", http.StatusOK)
 }

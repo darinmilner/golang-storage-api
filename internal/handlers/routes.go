@@ -3,6 +3,7 @@ package handlers
 import (
 	"fileuploader/internal/filesystem/miniosystem"
 	"fileuploader/internal/filesystem/s3aws"
+	"fileuploader/internal/services/uploads"
 	"net/http"
 
 	"github.com/go-chi/chi/middleware"
@@ -11,16 +12,20 @@ import (
 )
 
 type service struct {
-	minio miniosystem.Minio
-	s3    s3aws.S3
+	minio           miniosystem.Minio
+	s3              s3aws.S3
+	uploadService   uploads.Upload
+	maintenanceMode bool
 }
 
 //TODO: populate minio and s3 structs
 //NewHttpHandler sets up the routes and handler service
-func NewHttpHandler() http.Handler {
+func NewHttpHandler(uploadService uploads.Upload) http.Handler {
 	s := &service{
-		minio: miniosystem.Minio{},
-		s3:    s3aws.S3{},
+		minio:           miniosystem.Minio{},
+		s3:              s3aws.S3{},
+		uploadService:   uploadService,
+		maintenanceMode: false,
 	}
 	return s.routes()
 }
@@ -43,8 +48,9 @@ func (s *service) routes() *chi.Mux {
 	}))
 
 	mux.Get("/list-fs", s.ListFS)
-	mux.Post("/files/upload", s.PostUploadToFS)
-	mux.Get("/delete-from-fs", s.DeleteFromFS)
-
+	mux.Post("/files/upload", ErrorMiddleware(s.PostUploadToFS))
+	mux.Get("/delete-from-fs", ErrorMiddleware(s.DeleteFromFS))
+	mux.Post("/files/upload-files", ErrorMiddleware(s.PostUpload))
+	mux.Post("/maintenance-mode", ErrorMiddleware(s.MaintenanceMode))
 	return mux
 }

@@ -5,10 +5,13 @@ import (
 	"fileuploader/internal/filesystem/miniosystem"
 	"fileuploader/internal/filesystem/s3aws"
 	"fileuploader/internal/handlers"
+	"fileuploader/internal/services/uploads"
 	"fileuploader/pkg/logger"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
+	"net/rpc"
 	"os"
 	"os/signal"
 	"sync"
@@ -16,20 +19,22 @@ import (
 	"time"
 )
 
+type RPCServer struct{}
+
 func main() {
-	initApp()
+	_, config := initApp()
 	go listenForShutdown()
-	ListenAndServe()
+	listenAndServe(config)
 
 }
 
 //initApp starts the app
-func initApp() map[string]interface{} {
+func initApp() (map[string]interface{}, config.Config) {
 	config, err := config.NewConfig()
 	if err != nil {
 		logger.Fatalf("Config can not be created %v", err)
 	}
-	return createFileSystem(*config, config.RemoteFSName)
+	return createFileSystem(*config, config.RemoteFSName), *config
 }
 
 //createFileSystem creates the file systems for MINIO and AWS
@@ -91,8 +96,9 @@ func shutdown() {
 }
 
 //ListenAndServe starts the server
-func ListenAndServe() error {
-	handlers := handlers.NewHttpHandler()
+func listenAndServe(config config.Config) error {
+	uploadService := uploads.NewUploadService(config)
+	handlers := handlers.NewHttpHandler(uploadService)
 	srv := &http.Server{
 		Addr:         fmt.Sprintf(":%s", os.Getenv("PORT")),
 		Handler:      handlers,
@@ -101,8 +107,35 @@ func ListenAndServe() error {
 		WriteTimeout: 600 * time.Second,
 	}
 
-	//TODO: Add GRPC
-	//go c.listenRPC()
-	log.Printf("Listening on port %s", os.Getenv("PORT"))
+	go listenRPC()
+	logger.Infof("Listening on port %s", os.Getenv("PORT"))
 	return srv.ListenAndServe()
+}
+
+func listenRPC() {
+	// if nothing in env for rpc port, do not start
+	rpcPort := os.Getenv("RPC_PORT")
+	if rpcPort != "" {
+		logger.Infof("Starting RPC server on %s", rpcPort)
+		err := rpc.Register(new(RPCServer))
+		if err != nil {
+			logger.Error(err)
+			return
+		}
+
+		listen, err := net.Listen("tcp", "127.0.0.1:"+rpcPort)
+		if err != nil {
+			logger.Error(err)
+			return
+		}
+
+		for {
+			rpcConn, err := listen.Accept()
+			if err != nil {
+				continue
+			}
+
+			go rpc.ServeConn(rpcConn)
+		}
+	}
 }

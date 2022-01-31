@@ -7,7 +7,6 @@ import (
 	"fileuploader/pkg/logger"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"os"
 	"path"
@@ -15,11 +14,15 @@ import (
 	"github.com/gabriel-vasile/mimetype"
 )
 
+type Upload interface {
+	getFileToUpload(r *http.Request, fieldName string) (string, error)
+	UploadFile(r *http.Request, destination string, field string, fs filesystem.FS) error
+}
 type service struct {
 	Config config.Config
 }
 
-func NewUploadService(config config.Config) *service {
+func NewUploadService(config config.Config) Upload {
 	return &service{
 		Config: config,
 	}
@@ -27,7 +30,7 @@ func NewUploadService(config config.Config) *service {
 
 func (s *service) getFileToUpload(r *http.Request, fieldName string) (string, error) {
 	if err := r.ParseMultipartForm(s.Config.MaxUploadSize); err != nil {
-		log.Println(err)
+		logger.Errorf("Upload service: Error getting file to upload %v", err)
 		return "", err
 	}
 
@@ -102,6 +105,11 @@ func (s *service) UploadFile(r *http.Request, destination string, field string, 
 			return err
 		}
 	}
+
+	// removes temp file from server
+	defer func() {
+		_ = os.Remove(fileName)
+	}()
 
 	return nil
 }

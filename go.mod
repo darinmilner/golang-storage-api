@@ -10,11 +10,14 @@ require (
 	github.com/joho/godotenv v1.4.0
 	github.com/minio/minio-go/v7 v7.0.21
 	go.uber.org/zap v1.20.0
+	google.golang.org/grpc v1.44.0
 	gopkg.in/yaml.v2 v2.2.8
 )
 
 require (
 	github.com/dustin/go-humanize v1.0.0 // indirect
+	github.com/golang/protobuf v1.4.3 // indirect
+	github.com/google/go-cmp v0.5.6 // indirect
 	github.com/google/uuid v1.1.2 // indirect
 	github.com/hashicorp/errwrap v1.0.0 // indirect
 	github.com/jmespath/go-jmespath v0.4.0 // indirect
@@ -35,6 +38,8 @@ require (
 	golang.org/x/net v0.0.0-20211216030914-fe4d6282115f // indirect
 	golang.org/x/sys v0.0.0-20210630005230-0f9fa26af87c // indirect
 	golang.org/x/text v0.3.6 // indirect
+	google.golang.org/genproto v0.0.0-20200526211855-cb27e3aa2013 // indirect
+	google.golang.org/protobuf v1.25.0 // indirect
 	gopkg.in/ini.v1 v1.62.0 // indirect
 )
 
